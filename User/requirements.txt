@@ -1,0 +1,7 @@
+streamlit
+langchain
+faiss-cpu
+langchain-community
+langchain_aws
+boto3
+cryptography>=3.1

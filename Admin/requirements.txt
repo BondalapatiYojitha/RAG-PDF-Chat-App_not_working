@@ -1,0 +1,8 @@
+streamlit
+pypdf
+langchain
+langchain-community
+langchain_aws
+faiss-cpu
+boto3
+cryptography>=3.1
