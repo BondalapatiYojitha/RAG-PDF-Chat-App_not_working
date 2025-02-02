@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdf-reader-client
+  labels:
+    app: pdf-reader-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pdf-reader-client
+  template:
+    metadata:
+      labels:
+        app: pdf-reader-client
+    spec:
+      containers:
+      - name: pdf-reader-client
+        image: pdf-reader-client:latest  # This image is expected to be preloaded or imported into the runtime
+        ports:
+        - containerPort: 8084

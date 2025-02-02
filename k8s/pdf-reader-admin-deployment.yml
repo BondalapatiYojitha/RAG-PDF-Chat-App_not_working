@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdf-reader-admin
+  labels:
+    app: pdf-reader-admin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pdf-reader-admin
+  template:
+    metadata:
+      labels:
+        app: pdf-reader-admin
+    spec:
+      containers:
+      - name: pdf-reader-admin
+        image: pdf-reader-admin:latest  # This image is expected to be loaded on the nodes (e.g., via a custom image loader)
+        ports:
+        - containerPort: 8083
