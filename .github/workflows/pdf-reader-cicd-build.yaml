@@ -1,0 +1,64 @@
+name: Deploy to EKS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}       # e.g., us-east-2
+      EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }} # Your EKS cluster name
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      # The names of your ECR repositories for each microservice
+      ECR_REPO_ADMIN: pdf-reader-admin
+      ECR_REPO_CLIENT: pdf-reader-client
+    steps:
+      # 1. Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # 2. Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 3. Log in to Amazon ECR
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # 4. Build the Docker images using specific Dockerfiles
+      - name: Build pdf-reader-admin image
+        run: |
+          docker build -t $ECR_REPO_ADMIN -f Dockerfile.admin .
+          docker tag $ECR_REPO_ADMIN:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_ADMIN:${{ github.sha }}
+      - name: Build pdf-reader-client image
+        run: |
+          docker build -t $ECR_REPO_CLIENT -f Dockerfile.client .
+          docker tag $ECR_REPO_CLIENT:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_CLIENT:${{ github.sha }}
+
+      # 5. Push the images to Amazon ECR
+      - name: Push pdf-reader-admin image to ECR
+        run: |
+          docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_ADMIN:${{ github.sha }}
+      - name: Push pdf-reader-client image to ECR
+        run: |
+          docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_CLIENT:${{ github.sha }}
+
+      # 6. Update kubeconfig to connect to your EKS cluster
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
+
+      # 7. Deploy Kubernetes manifests
+      - name: Deploy to EKS
+        run: |
+          kubectl apply -f k8s/
+          # Optionally, update the deployments with the new image tags:
+          kubectl set image deployment/pdf-reader-admin pdf-reader-admin=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_ADMIN:${{ github.sha }} --record
+          kubectl set image deployment/pdf-reader-client pdf-reader-client=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_CLIENT:${{ github.sha }} --record
