@@ -24,3 +24,9 @@ spec:
                   "--server.port=8083",
                   "--server.enableCORS=false",
                   "--server.enableXsrfProtection=false"]
+        readinessProbe:  # 👈 AWS needs this to mark the pod as healthy!
+          httpGet:
+            path: /
+            port: 8083
+          initialDelaySeconds: 5
+          periodSeconds: 10
