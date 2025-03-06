@@ -4,4 +4,4 @@ WORKDIR /app
 COPY ./Admin/requirements.txt ./
 RUN pip install -r requirements.txt
 COPY . ./
-ENTRYPOINT [ "streamlit", "run", "./Admin/admin.py", "--server.port=8083" ]
+ENTRYPOINT [ "streamlit", "run", "./Admin/admin.py", "--server.port=8083", "--server.address=0.0.0.0", "--server.enableCORS=false", "--server.enableXsrfProtection=false" ]
