@@ -58,7 +58,7 @@ def get_response(llm,vectorstore, question ):
     st.write(f"Hurray I am analyzing your question: {question}")
     prompt_template = """
 
-    Human: Please use the given context to provide concise answer to the question
+    Human: Please use the given context to provide concise answer to the question !!!
     If you don't know the answer, just say that you don't know, don't try to make up an answer.
     <context>
     {context}
