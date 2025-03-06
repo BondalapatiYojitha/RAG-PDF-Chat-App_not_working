@@ -4,4 +4,4 @@ WORKDIR /app
 COPY ./User/requirements.txt ./
 RUN pip install -r requirements.txt
 COPY . ./
-ENTRYPOINT [ "streamlit", "run", "app.py", "--server.port=8084" ]
+ENTRYPOINT [ "streamlit", "run", "./User/app.py", "--server.port=8084" ]
