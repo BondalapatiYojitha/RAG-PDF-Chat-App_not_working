@@ -19,3 +19,8 @@ spec:
         image: pdf-reader-client:latest  # This image is expected to be preloaded or imported into the runtime
         ports:
         - containerPort: 8084
+        command: ["streamlit", "run", "./User/app.py",
+                  "--server.address=0.0.0.0",
+                  "--server.port=8084",
+                  "--server.enableCORS=false",
+                  "--server.enableXsrfProtection=false"]
