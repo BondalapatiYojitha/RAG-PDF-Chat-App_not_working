@@ -6,7 +6,6 @@ metadata:
 spec:
   type: LoadBalancer
   externalTrafficPolicy: Local  # Ensures traffic only goes to nodes running the pod
-  healthCheckNodePort: 31008     # Enables AWS health checks
   selector:
     app: pdf-reader-client
   ports:
