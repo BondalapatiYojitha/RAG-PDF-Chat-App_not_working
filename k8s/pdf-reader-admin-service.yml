@@ -5,7 +5,9 @@ metadata:
   namespace: default
   annotations:
     service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing  # 👈 This makes it public
-
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8083"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "HTTP"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/"
 spec:
   type: LoadBalancer
   externalTrafficPolicy: Local  # Ensures traffic only goes to nodes running the pod
@@ -15,7 +17,4 @@ spec:
     - port: 80
       targetPort: 8083
       protocol: TCP
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8083"
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "HTTP"
-    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/"
+
