@@ -19,7 +19,7 @@ spec:
         image: pdf-reader-admin:latest  # This image is expected to be loaded on the nodes (e.g., via a custom image loader)
         ports:
         - containerPort: 8083
-        command: ["streamlit", "run", "./Admin/admin.py",
+        command: ["streamlit", "run", "./Admin/admin_many_pdfs.py",
                   "--server.address=0.0.0.0",
                   "--server.port=8083",
                   "--server.enableCORS=false",
