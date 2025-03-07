@@ -35,11 +35,17 @@ jobs:
       # 4. Build the Docker images using specific Dockerfiles
       - name: Build pdf-reader-admin image
         run: |
-          docker build -t $ECR_REPO_ADMIN -f Docker/PDF-Reader-Admin/Dockerfile .
+          docker build --build-arg AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
+                       --build-arg AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
+                       --build-arg AWS_REGION=${{ secrets.AWS_REGION }} \
+                       -t $ECR_REPO_ADMIN -f Docker/PDF-Reader-Admin/Dockerfile .
           docker tag $ECR_REPO_ADMIN:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_ADMIN:${{ github.sha }}
       - name: Build pdf-reader-client image
         run: |
-          docker build -t $ECR_REPO_CLIENT -f Docker/PDF-Reader-Client/Dockerfile .
+          docker build --build-arg AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
+                       --build-arg AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
+                       --build-arg AWS_REGION=${{ secrets.AWS_REGION }} \
+                       -t $ECR_REPO_CLIENT -f Docker/PDF-Reader-Client/Dockerfile .
           docker tag $ECR_REPO_CLIENT:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_CLIENT:${{ github.sha }}
 
       # 5. Push the images to Amazon ECR
