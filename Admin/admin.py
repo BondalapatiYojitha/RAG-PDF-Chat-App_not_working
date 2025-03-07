@@ -5,7 +5,8 @@ import streamlit as st
 
 # AWS S3 Configuration
 s3_client = boto3.client("s3")
-BUCKET_NAME = os.getenv("BUCKET_NAME")
+#BUCKET_NAME = os.getenv("BUCKET_NAME")
+BUCKET_NAME = "yojitha-chat-with-pdf"
 # Explicitly Set AWS Region
 os.environ["AWS_REGION"] = "us-east-1"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
