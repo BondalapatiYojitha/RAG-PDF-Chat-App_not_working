@@ -30,3 +30,9 @@ spec:
             port: 8084
           initialDelaySeconds: 5
           periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8084
+          initialDelaySeconds: 5
+          periodSeconds: 10
