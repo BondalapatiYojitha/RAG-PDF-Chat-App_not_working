@@ -3,6 +3,9 @@ kind: Service
 metadata:
   name: pdf-reader-admin-service
   namespace: default
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing  # 👈 This makes it public
+
 spec:
   type: LoadBalancer
   externalTrafficPolicy: Local  # Ensures traffic only goes to nodes running the pod
