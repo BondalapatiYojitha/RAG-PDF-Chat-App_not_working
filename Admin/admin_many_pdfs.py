@@ -37,8 +37,7 @@ from langchain_community.vectorstores import FAISS
 # Initialize Bedrock Embeddings
 bedrock_embeddings = BedrockEmbeddings(
     model_id="amazon.titan-embed-text-v1",
-    client=bedrock_client,
-    model_kwargs={"input_type": "search_document"}
+    client=bedrock_client
 )
 
 # Generate Unique ID
