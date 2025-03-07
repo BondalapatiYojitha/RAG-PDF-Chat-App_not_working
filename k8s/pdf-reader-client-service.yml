@@ -11,6 +11,6 @@ spec:
   selector:
     app: pdf-reader-client
   ports:
-    - port: 8084
+    - port: 80
       targetPort: 8084
       protocol: TCP
