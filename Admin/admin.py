@@ -15,6 +15,10 @@ aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
 aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
 aws_region = os.getenv("AWS_REGION", "us-east-1")
 
+st.write("aws_access_key  : {aws_access_key}")
+st.write("aws_secret_key  : {aws_secret_key}")
+st.write("aws_region  : {aws_region}")
+
 # Initialize Bedrock Client with credentials
 bedrock_client = boto3.client(
     service_name="bedrock-runtime",
