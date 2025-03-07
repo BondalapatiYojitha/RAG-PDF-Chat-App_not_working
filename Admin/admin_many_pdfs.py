@@ -2,13 +2,12 @@ import os
 import uuid
 import boto3
 import streamlit as st
-import shutil
 
 # AWS S3 Configuration
 s3_client = boto3.client("s3")
-#BUCKET_NAME = os.getenv("BUCKET_NAME")
-BUCKET_NAME = "yojitha-chat-with-pdf"
-# Explicitly Set AWS Region
+BUCKET_NAME = "yojitha-chat-with-pdf"  # Hardcoded bucket name
+
+# Ensure AWS Region is Set
 os.environ["AWS_REGION"] = "us-east-1"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
@@ -17,7 +16,11 @@ aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
 aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
 aws_region = os.getenv("AWS_REGION", "us-east-1")
 
-# Initialize Bedrock Client with credentials
+# Validate AWS Credentials
+if not aws_access_key or not aws_secret_key:
+    st.error("AWS credentials are missing! Please configure them in your environment.")
+
+# Initialize Bedrock Client
 bedrock_client = boto3.client(
     service_name="bedrock-runtime",
     region_name=aws_region,
@@ -45,10 +48,9 @@ def get_unique_id():
 # Split text into chunks
 def split_text(pages, chunk_size=1000, chunk_overlap=200):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    docs = text_splitter.split_documents(pages)
-    return docs
+    return text_splitter.split_documents(pages)
 
-# Function to check if a vector store already exists in S3
+# Check if FAISS index exists in S3
 def vector_store_exists(request_id):
     try:
         s3_client.head_object(Bucket=BUCKET_NAME, Key=f"faiss_files/{request_id}.faiss")
@@ -56,35 +58,50 @@ def vector_store_exists(request_id):
     except:
         return False
 
-# Merge an existing FAISS index with new vectors
+# Merge FAISS vector stores correctly
 def merge_vector_stores(existing_faiss, new_faiss):
-    existing_faiss.merge_from(new_faiss)
+    """Merge new FAISS index into an existing FAISS index"""
+    texts = [new_faiss.docstore[i] for i in new_faiss.index_to_docstore_id.keys()]
+    vectors = list(new_faiss.index_to_docstore_id.keys())
+    existing_faiss.add_texts(texts, vectors)
 
 # Create or Update FAISS Vector Store
 def create_vector_store(request_id, documents):
     local_folder = "/tmp"
-    faiss_path = os.path.join(local_folder, f"{request_id}.faiss")
-    pkl_path = os.path.join(local_folder, f"{request_id}.pkl")
+    faiss_folder = os.path.join(local_folder, f"{request_id}")
+    faiss_path = os.path.join(faiss_folder, "index")
+    pkl_path = os.path.join(faiss_folder, "index.pkl")
 
-    # Check if existing vector store is in S3
+    # Ensure local folder exists
+    os.makedirs(faiss_folder, exist_ok=True)
+
+    # Check if existing vector store exists in S3
     if vector_store_exists(request_id):
+        # Download existing FAISS index
         s3_client.download_file(BUCKET_NAME, f"faiss_files/{request_id}.faiss", faiss_path)
         s3_client.download_file(BUCKET_NAME, f"faiss_files/{request_id}.pkl", pkl_path)
 
         # Load existing FAISS
-        existing_vectorstore = FAISS.load_local(index_name=faiss_path, embeddings=bedrock_embeddings)
+        existing_vectorstore = FAISS.load_local(index_name="index", folder_path=faiss_folder, embeddings=bedrock_embeddings)
 
         # Create new FAISS from documents
         new_vectorstore = FAISS.from_documents(documents, bedrock_embeddings)
 
-        # Merge with existing vectorstore
+        # Merge vector stores
         merge_vector_stores(existing_vectorstore, new_vectorstore)
-        existing_vectorstore.save_local(index_name=faiss_path, folder_path=local_folder)
+
+        # Save merged FAISS index
+        existing_vectorstore.save_local(index_name="index", folder_path=faiss_folder)
 
     else:
         # Create new FAISS if none exists
         vectorstore_faiss = FAISS.from_documents(documents, bedrock_embeddings)
-        vectorstore_faiss.save_local(index_name=faiss_path, folder_path=local_folder)
+        vectorstore_faiss.save_local(index_name="index", folder_path=faiss_folder)
+
+    # Ensure pickle file exists before uploading
+    if not os.path.exists(pkl_path):
+        with open(pkl_path, "wb") as f:
+            pass  # Create an empty file
 
     # Upload to S3
     s3_client.upload_file(faiss_path, BUCKET_NAME, f"faiss_files/{request_id}.faiss")
