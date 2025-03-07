@@ -59,7 +59,7 @@ def create_vector_store(request_id, documents):
 
 ## main method
 def main():
-    st.write("This is Admin Site for Chat with PDF : ")
+    st.write("This is Admin Site for Chat with PDF  : ")
     uploaded_file = st.file_uploader("Choose a file", "pdf")
     if uploaded_file is not None:
         request_id = get_unique_id()
