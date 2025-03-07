@@ -6,15 +6,21 @@ import streamlit as st
 # AWS S3 Configuration
 s3_client = boto3.client("s3")
 BUCKET_NAME = os.getenv("BUCKET_NAME")
-
 # Explicitly Set AWS Region
 os.environ["AWS_REGION"] = "us-east-1"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
-# Initialize Bedrock Client
+# Load AWS credentials from environment variables
+aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+aws_region = os.getenv("AWS_REGION", "us-east-1")
+
+# Initialize Bedrock Client with credentials
 bedrock_client = boto3.client(
     service_name="bedrock-runtime",
-    region_name=os.getenv("AWS_REGION", "us-east-1")
+    region_name=aws_region,
+    aws_access_key_id=aws_access_key,
+    aws_secret_access_key=aws_secret_key
 )
 
 # Import Bedrock Embeddings from `langchain-aws`
@@ -28,11 +34,6 @@ bedrock_embeddings = BedrockEmbeddings(
     model_id="amazon.titan-embed-text-v1",
     client=bedrock_client
 )
-
-
-
-
-
 
 def get_unique_id():
     return str(uuid.uuid4())
