@@ -5,7 +5,7 @@ import streamlit as st
 
 # AWS S3 Configuration
 s3_client = boto3.client("s3")
-BUCKET_NAME = "yojitha-chat-with-pdf"  # Hardcoded bucket name
+BUCKET_NAME = "yojitha-chat-with-pdf"  # Replace with your actual S3 bucket
 
 # Ensure AWS Region is Set
 os.environ["AWS_REGION"] = "us-east-1"
@@ -67,14 +67,14 @@ def merge_vector_stores(existing_faiss, new_faiss):
 # Create or Update FAISS Vector Store
 def create_vector_store(request_id, documents):
     local_folder = "/tmp"
-    faiss_folder = os.path.join(local_folder, f"{request_id}")
+    faiss_folder = os.path.join(local_folder, request_id)
     faiss_path = os.path.join(faiss_folder, "index")
     pkl_path = os.path.join(faiss_folder, "index.pkl")
 
-    # Ensure local folder exists
+    # ✅ Ensure directory exists
     os.makedirs(faiss_folder, exist_ok=True)
 
-    # Check if existing vector store exists in S3
+    # ✅ Ensure FAISS index is created before uploading
     if vector_store_exists(request_id):
         # Download existing FAISS index
         s3_client.download_file(BUCKET_NAME, f"faiss_files/{request_id}.faiss", faiss_path)
@@ -86,23 +86,26 @@ def create_vector_store(request_id, documents):
         # Create new FAISS from documents
         new_vectorstore = FAISS.from_documents(documents, bedrock_embeddings)
 
-        # Merge vector stores
+        # ✅ Merge new vectors into existing FAISS index
         merge_vector_stores(existing_vectorstore, new_vectorstore)
 
-        # Save merged FAISS index
+        # ✅ Save merged FAISS index
         existing_vectorstore.save_local(index_name="index", folder_path=faiss_folder)
 
     else:
-        # Create new FAISS if none exists
+        # ✅ Create a new FAISS index if none exists
         vectorstore_faiss = FAISS.from_documents(documents, bedrock_embeddings)
         vectorstore_faiss.save_local(index_name="index", folder_path=faiss_folder)
 
-    # Ensure pickle file exists before uploading
+    # ✅ Ensure FAISS files exist before uploading
+    if not os.path.exists(faiss_path):
+        raise FileNotFoundError(f"FAISS index file not found: {faiss_path}")
+
     if not os.path.exists(pkl_path):
         with open(pkl_path, "wb") as f:
             pass  # Create an empty file
 
-    # Upload to S3
+    # ✅ Upload FAISS files to S3
     s3_client.upload_file(faiss_path, BUCKET_NAME, f"faiss_files/{request_id}.faiss")
     s3_client.upload_file(pkl_path, BUCKET_NAME, f"faiss_files/{request_id}.pkl")
 
@@ -138,12 +141,14 @@ def main():
 
             # Process & Store Vectors
             st.write("Creating the Vector Store...")
-            result = create_vector_store(request_id, splitted_docs)
-
-            if result:
-                st.success(f"Successfully processed {uploaded_file.name}!")
-            else:
-                st.error(f"Error processing {uploaded_file.name}!")
+            try:
+                result = create_vector_store(request_id, splitted_docs)
+                if result:
+                    st.success(f"Successfully processed {uploaded_file.name}!")
+                else:
+                    st.error(f"Error processing {uploaded_file.name}!")
+            except Exception as e:
+                st.error(f"Error during vector store creation: {e}")
 
 if __name__ == "__main__":
     main()
