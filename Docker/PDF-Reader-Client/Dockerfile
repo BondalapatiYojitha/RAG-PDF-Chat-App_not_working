@@ -29,4 +29,4 @@ RUN echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" && \
     echo "AWS_REGION=$AWS_REGION"
 
 # Start Streamlit app
-ENTRYPOINT [ "streamlit", "run", "./User/app.py", "--server.port=8084", "--server.address=0.0.0.0", "--server.enableCORS=false", "--server.enableXsrfProtection=false" ]
+ENTRYPOINT [ "streamlit", "run", "./User/app_many_pdfs.py", "--server.port=8084", "--server.address=0.0.0.0", "--server.enableCORS=false", "--server.enableXsrfProtection=false" ]
