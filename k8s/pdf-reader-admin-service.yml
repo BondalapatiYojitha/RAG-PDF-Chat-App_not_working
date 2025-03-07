@@ -15,3 +15,7 @@ spec:
     - port: 80
       targetPort: 8083
       protocol: TCP
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "8083"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "HTTP"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/"
