@@ -51,15 +51,30 @@ def split_text(pages, chunk_size=1000, chunk_overlap=200):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     return text_splitter.split_documents(pages)
 
-# Check if FAISS index exists in S3
-def vector_store_exists(file_name):
-    try:
-        s3_client.head_object(Bucket=BUCKET_NAME, Key=f"faiss_files/{file_name}.faiss")
-        return True
-    except:
-        return False
+# Check if FAISS index exists in S3 and download it if needed
+def list_faiss_indexes():
+    """Fetch and list FAISS indexes from S3, ensuring they are downloaded locally."""
+    response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="faiss_files/")
+    
+    if "Contents" in response:
+        indexes = sorted(set(obj["Key"].split("/")[-1].split(".")[0] for obj in response["Contents"] if obj["Key"].endswith(".faiss")))
+        
+        # Ensure each index is downloaded locally
+        for index in indexes:
+            local_faiss_path = os.path.join(folder_path, f"{index}.faiss")
+            local_pkl_path = os.path.join(folder_path, f"{index}.pkl")
+            
+            if not os.path.exists(local_faiss_path):
+                s3_client.download_file(BUCKET_NAME, f"faiss_files/{index}.faiss", local_faiss_path)
+            
+            if not os.path.exists(local_pkl_path):
+                s3_client.download_file(BUCKET_NAME, f"faiss_files/{index}.pkl", local_pkl_path)
+        
+        return indexes
 
-# Create or Update FAISS Vector Store
+    return []
+
+# Function to create or update FAISS vector store
 def create_vector_store(file_name, documents):
     local_folder = "/tmp"
     faiss_folder = os.path.join(local_folder, file_name)
@@ -68,11 +83,11 @@ def create_vector_store(file_name, documents):
     faiss_index_path = os.path.join(faiss_folder, "index")
     pkl_path = os.path.join(faiss_folder, "index.pkl")
 
-    if vector_store_exists(file_name):
+    if file_name in list_faiss_indexes():
         s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.faiss", faiss_index_path + ".faiss")
         s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.pkl", pkl_path)
 
-        # FIX: Load FAISS safely with deserialization enabled
+        # Load FAISS safely
         existing_vectorstore = FAISS.load_local(
             index_name="index",
             folder_path=faiss_folder,
@@ -91,18 +106,6 @@ def create_vector_store(file_name, documents):
 
     s3_client.upload_file(faiss_index_path + ".faiss", BUCKET_NAME, f"faiss_files/{file_name}.faiss")
     s3_client.upload_file(pkl_path, BUCKET_NAME, f"faiss_files/{file_name}.pkl")
-
-# Function to list FAISS indexes in S3
-def list_faiss_indexes():
-    response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="faiss_files/")
-    if "Contents" in response:
-        return sorted(set(obj["Key"].split("/")[-1].split(".")[0] for obj in response["Contents"]))
-    return []
-
-# Function to download a selected FAISS index from S3
-def load_selected_index(selected_index):
-    s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.faiss", f"{folder_path}{selected_index}.faiss")
-    s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.pkl", f"{folder_path}{selected_index}.pkl")
 
 # Initialize the LLM
 def get_llm():
@@ -164,19 +167,34 @@ def main():
     st.subheader("Ask Questions from the Knowledge Base")
 
     faiss_indexes = list_faiss_indexes()
-    selected_index = st.selectbox("Select a FAISS index", faiss_indexes)
 
-    faiss_index_path = os.path.join(folder_path, selected_index, "index.faiss")
-
-    if not os.path.exists(faiss_index_path):
-        st.error(f"FAISS index file not found: {faiss_index_path}. Please upload the document first.")
+    if not faiss_indexes:
+        st.error("No FAISS indexes found in S3. Please upload PDFs first.")
         return
 
-    # Load FAISS safely
-    faiss_index = FAISS.load_local(selected_index, folder_path, bedrock_embeddings, allow_dangerous_deserialization=True)
-    question = st.text_input(f"Ask a question about {selected_index}")
+    selected_index = st.selectbox("Select a FAISS index", faiss_indexes)
+
+    # Ensure FAISS index is downloaded
+    faiss_index_path = os.path.join(folder_path, f"{selected_index}.faiss")
+
+    if not os.path.exists(faiss_index_path):
+        st.warning(f"Downloading FAISS index: {selected_index} from S3...")
+        s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.faiss", faiss_index_path)
+        s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.pkl", os.path.join(folder_path, f"{selected_index}.pkl"))
+
+    st.success(f"Loaded index: {selected_index}")
+
+    # Dynamic Placeholder with Document Name
+    question_placeholder = f"Ask a question about {selected_index}" if selected_index else "Ask a question"
+    question = st.text_input(question_placeholder)
 
     if st.button("Ask Question"):
+        faiss_index = FAISS.load_local(
+            index_name=selected_index,
+            folder_path=folder_path,
+            embeddings=bedrock_embeddings,
+            allow_dangerous_deserialization=True
+        )
         answer = get_response(get_llm(), faiss_index, question)
         st.write(answer)
 
