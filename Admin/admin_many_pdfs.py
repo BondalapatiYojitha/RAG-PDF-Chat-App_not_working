@@ -51,7 +51,7 @@ def split_text(pages, chunk_size=1000, chunk_overlap=200):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     return text_splitter.split_documents(pages)
 
-# Check if FAISS index exists in S3 and download it if needed
+# Fetch FAISS indexes from S3 and download if needed
 def list_faiss_indexes():
     """Fetch and list FAISS indexes from S3, ensuring they are downloaded locally."""
     response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="faiss_files/")
@@ -74,7 +74,7 @@ def list_faiss_indexes():
 
     return []
 
-# Function to create or update FAISS vector store
+# Create or update FAISS vector store only when a new file is uploaded
 def create_vector_store(file_name, documents):
     local_folder = "/tmp"
     faiss_folder = os.path.join(local_folder, file_name)
@@ -83,26 +83,12 @@ def create_vector_store(file_name, documents):
     faiss_index_path = os.path.join(faiss_folder, "index")
     pkl_path = os.path.join(faiss_folder, "index.pkl")
 
+    # Avoid reprocessing existing FAISS indexes
     if file_name in list_faiss_indexes():
-        s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.faiss", faiss_index_path + ".faiss")
-        s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.pkl", pkl_path)
+        return
 
-        # Load FAISS safely
-        existing_vectorstore = FAISS.load_local(
-            index_name="index",
-            folder_path=faiss_folder,
-            embeddings=bedrock_embeddings,
-            allow_dangerous_deserialization=True
-        )
-
-        new_vectorstore = FAISS.from_documents(documents, bedrock_embeddings)
-        existing_vectorstore.merge_from(new_vectorstore)
-
-        existing_vectorstore.save_local(index_name="index", folder_path=faiss_folder)
-
-    else:
-        vectorstore_faiss = FAISS.from_documents(documents, bedrock_embeddings)
-        vectorstore_faiss.save_local(index_name="index", folder_path=faiss_folder)
+    vectorstore_faiss = FAISS.from_documents(documents, bedrock_embeddings)
+    vectorstore_faiss.save_local(index_name="index", folder_path=faiss_folder)
 
     s3_client.upload_file(faiss_index_path + ".faiss", BUCKET_NAME, f"faiss_files/{file_name}.faiss")
     s3_client.upload_file(pkl_path, BUCKET_NAME, f"faiss_files/{file_name}.pkl")
@@ -145,7 +131,7 @@ def get_response(llm, vectorstore, question):
 def main():
     st.title("Chat with Your PDF")
 
-    # File Upload Section
+    # File Upload Section (Only Process Once)
     st.subheader("Upload PDF to Add to the Knowledge Base")
     uploaded_files = st.file_uploader("Choose PDFs", type="pdf", accept_multiple_files=True)
 
@@ -162,10 +148,13 @@ def main():
             pages = loader.load_and_split()
 
             splitted_docs = split_text(pages)
-            create_vector_store(clean_name, splitted_docs)
-            st.success(f"Successfully processed {uploaded_file.name}!")
 
-    # Question Answering Section
+            # Process & create FAISS index only ONCE
+            if clean_name not in list_faiss_indexes():
+                create_vector_store(clean_name, splitted_docs)
+                st.success(f"Successfully processed {uploaded_file.name}!")
+
+    # Question Answering Section (Separate from Uploading)
     st.subheader("Ask Questions from the Knowledge Base")
 
     faiss_indexes = list_faiss_indexes()
