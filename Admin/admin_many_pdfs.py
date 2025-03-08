@@ -133,9 +133,13 @@ def get_response(llm, primary_vectorstore, selected_doc, question):
 
     # ❌ No answer found, search across all indexes
     all_faiss_indexes = list_faiss_indexes()
+    all_sources = set()
     combined_vectorstore = None
 
     for index in all_faiss_indexes:
+        if index == selected_doc:
+            continue  # Skip the already searched document
+
         faiss_index = FAISS.load_local(
             index_name=index,
             folder_path=folder_path,
@@ -161,10 +165,11 @@ def get_response(llm, primary_vectorstore, selected_doc, question):
         retrieved_docs = response.get("source_documents", [])
         
         if retrieved_docs:
-            source_text = "\n\n📄 Not found in " + selected_doc + " but found in: " + ", ".join(set(doc.metadata["source"] for doc in retrieved_docs if "source" in doc.metadata))
+            all_sources = set(doc.metadata["source"] for doc in retrieved_docs if "source" in doc.metadata)
+            source_text = f"\n\n📄 Not found in {selected_doc}, but found in: {', '.join(all_sources)}"
             return response["result"] + source_text
 
-    return "I couldn't find relevant information in any document."
+    return f"I couldn't find relevant information in {selected_doc} or any other document."
 
 # Main Streamlit App
 def main():
