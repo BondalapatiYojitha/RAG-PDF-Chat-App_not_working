@@ -5,7 +5,7 @@ import streamlit as st
 
 # AWS S3 Configuration
 s3_client = boto3.client("s3")
-BUCKET_NAME = "yojitha-chat-with-pdf"  # Replace with your actual S3 bucket
+BUCKET_NAME = "yojitha-chat-with-pdf"
 
 # Ensure AWS Region is Set
 os.environ["AWS_REGION"] = "us-east-1"
@@ -40,19 +40,14 @@ bedrock_embeddings = BedrockEmbeddings(
     client=bedrock_client
 )
 
-# Generate Unique ID
-def get_unique_id():
-    return str(uuid.uuid4())
-
-# Split text into chunks
-def split_text(pages, chunk_size=1000, chunk_overlap=200):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    return text_splitter.split_documents(pages)
+# Function to clean file names (removes spaces & special characters)
+def clean_file_name(file_name):
+    return "".join(c if c.isalnum() or c in ('.', '_') else "_" for c in file_name)
 
 # Check if FAISS index exists in S3
-def vector_store_exists(request_id):
+def vector_store_exists(file_name):
     try:
-        s3_client.head_object(Bucket=BUCKET_NAME, Key=f"faiss_files/{request_id}.faiss")
+        s3_client.head_object(Bucket=BUCKET_NAME, Key=f"faiss_files/{file_name}.faiss")
         return True
     except:
         return False
@@ -64,17 +59,17 @@ def merge_vector_stores(existing_faiss, new_faiss):
     existing_faiss.add_texts(texts, vectors)
 
 # Create or Update FAISS Vector Store
-def create_vector_store(request_id, documents):
+def create_vector_store(file_name, documents):
     local_folder = "/tmp"
-    faiss_folder = os.path.join(local_folder, request_id)
+    faiss_folder = os.path.join(local_folder, file_name)
     os.makedirs(faiss_folder, exist_ok=True)
 
     faiss_index_path = os.path.join(faiss_folder, "index")
     pkl_path = os.path.join(faiss_folder, "index.pkl")
 
-    if vector_store_exists(request_id):
-        s3_client.download_file(BUCKET_NAME, f"faiss_files/{request_id}.faiss", faiss_index_path + ".faiss")
-        s3_client.download_file(BUCKET_NAME, f"faiss_files/{request_id}.pkl", pkl_path)
+    if vector_store_exists(file_name):
+        s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.faiss", faiss_index_path + ".faiss")
+        s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.pkl", pkl_path)
 
         existing_vectorstore = FAISS.load_local(index_name="index", folder_path=faiss_folder, embeddings=bedrock_embeddings)
         new_vectorstore = FAISS.from_documents(documents, bedrock_embeddings)
@@ -94,8 +89,8 @@ def create_vector_store(request_id, documents):
         with open(pkl_path, "wb") as f:
             pass  
 
-    s3_client.upload_file(faiss_index_path + ".faiss", BUCKET_NAME, f"faiss_files/{request_id}.faiss")
-    s3_client.upload_file(pkl_path, BUCKET_NAME, f"faiss_files/{request_id}.pkl")
+    s3_client.upload_file(faiss_index_path + ".faiss", BUCKET_NAME, f"faiss_files/{file_name}.faiss")
+    s3_client.upload_file(pkl_path, BUCKET_NAME, f"faiss_files/{file_name}.pkl")
 
     return True
 
@@ -106,11 +101,13 @@ def main():
 
     if uploaded_files:
         for uploaded_file in uploaded_files:
-            request_id = get_unique_id()
+            original_file_name = os.path.splitext(uploaded_file.name)[0]  # Get file name without extension
+            clean_name = clean_file_name(original_file_name)  # Clean file name
+            
             st.write(f"Processing PDF: {uploaded_file.name}")
-            st.write(f"Request ID: {request_id}")
+            st.write(f"File Identifier: {clean_name}")
 
-            saved_file_name = os.path.join("/tmp", f"{request_id}.pdf")
+            saved_file_name = os.path.join("/tmp", f"{clean_name}.pdf")
             with open(saved_file_name, "wb") as f:
                 f.write(uploaded_file.getvalue())
 
@@ -128,7 +125,7 @@ def main():
 
             st.write("Creating the Vector Store...")
             try:
-                result = create_vector_store(request_id, splitted_docs)
+                result = create_vector_store(clean_name, splitted_docs)
                 if result:
                     st.success(f"Successfully processed {uploaded_file.name}!")
                 else:
