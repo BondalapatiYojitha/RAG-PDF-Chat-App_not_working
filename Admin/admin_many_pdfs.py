@@ -96,6 +96,50 @@ def create_vector_store(file_name, documents):
     s3_client.upload_file(faiss_index_path + ".faiss", BUCKET_NAME, f"faiss_files/{file_name}.faiss")
     s3_client.upload_file(pkl_path, BUCKET_NAME, f"faiss_files/{file_name}.pkl")
 
+# Function to list FAISS indexes in S3
+def list_faiss_indexes():
+    response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="faiss_files/")
+    if "Contents" in response:
+        return sorted(set(obj["Key"].split("/")[-1].split(".")[0] for obj in response["Contents"]))
+    return []
+
+# Function to download a selected FAISS index from S3
+def load_selected_index(selected_index):
+    s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.faiss", f"{folder_path}{selected_index}.faiss")
+    s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.pkl", f"{folder_path}{selected_index}.pkl")
+
+# Initialize the LLM
+def get_llm():
+    return Bedrock(model_id="anthropic.claude-v2:1", client=bedrock_client, model_kwargs={'max_tokens_to_sample': 512})
+
+# Retrieve answers using FAISS
+def get_response(llm, vectorstore, question):
+    prompt_template = """
+    Human: Please use the given context to provide a concise answer to the question.
+    If you don't know the answer, just say you don't know.
+    
+    <context>
+    {context}
+    </context>
+
+    Question: {question}
+    
+    Assistant:
+    """
+
+    PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+
+    qa = RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",
+        retriever=vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5}),
+        return_source_documents=True,
+        chain_type_kwargs={"prompt": PROMPT}
+    )
+
+    answer = qa({"query": question})
+    return answer['result']
+
 # Main Streamlit App
 def main():
     st.title("Chat with Your PDF")
@@ -136,21 +180,17 @@ def main():
             index_name=selected_index,
             folder_path=folder_path,
             embeddings=bedrock_embeddings,
-            allow_dangerous_deserialization=True  # FIX: Enable safe deserialization
+            allow_dangerous_deserialization=True
         )
         st.success(f"Loaded index: {selected_index}")
 
-    question = st.text_input("Ask a question about your document")
+    # ✅ Dynamic Placeholder with Document Name
+    question_placeholder = f"Ask a question about {selected_index}" if selected_index else "Ask a question"
+    question = st.text_input(question_placeholder)
+
     if st.button("Ask Question"):
-        llm = Bedrock(model_id="anthropic.claude-v2:1", client=bedrock_client, model_kwargs={'max_tokens_to_sample': 512})
-
-        answer = RetrievalQA.from_chain_type(
-            llm=llm,
-            chain_type="stuff",
-            retriever=faiss_index.as_retriever(search_type="similarity", search_kwargs={"k": 5}),
-            return_source_documents=True
-        ).run(question)
-
+        llm = get_llm()
+        answer = get_response(llm, faiss_index, question)
         st.write(answer)
 
 if __name__ == "__main__":
