@@ -122,13 +122,14 @@ def get_response(llm, vectorstore, question):
 
     return response, retrieved_docs
 
-# Extract source document names
+# Extract correct document names
 def extract_source_documents(retrieved_docs):
-    """Extracts and formats source document names from retrieved docs."""
+    """Extracts and formats correct source document names from retrieved docs."""
     sources = set()
     for doc in retrieved_docs:
         if "source" in doc.metadata:
-            sources.add(doc.metadata["source"])
+            file_name = os.path.basename(doc.metadata["source"])  # Extract only file name
+            sources.add(file_name)
 
     return sources
 
