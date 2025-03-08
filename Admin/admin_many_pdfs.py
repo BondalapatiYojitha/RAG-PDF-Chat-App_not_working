@@ -97,8 +97,8 @@ def create_vector_store(file_name, documents):
 def get_llm():
     return Bedrock(model_id="anthropic.claude-v2:1", client=bedrock_client, model_kwargs={'max_tokens_to_sample': 512})
 
-# Retrieve answers using FAISS and show source documents
-def get_response(llm, vectorstore, question):
+# Retrieve answers using FAISS and check across all indexes
+def get_response(llm, primary_vectorstore, selected_doc, question):
     """Retrieve answers using FAISS and display source documents."""
     prompt_template = """
     Human: Please use the given context to provide a concise answer to the question.
@@ -118,33 +118,53 @@ def get_response(llm, vectorstore, question):
     qa = RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",
-        retriever=vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5}),
+        retriever=primary_vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5}),
         return_source_documents=True,
         chain_type_kwargs={"prompt": PROMPT}
     )
 
-    # Retrieve documents from FAISS
+    # 🔍 Search in selected document first
     response = qa.invoke({"query": question})
-
-    # Extract retrieved documents
     retrieved_docs = response.get("source_documents", [])
+    
+    if retrieved_docs:
+        source_text = "\n\n📄 Found in: " + selected_doc
+        return response["result"] + source_text
 
-    # Debugging: Print retrieved documents
-    st.write(f"🔍 Retrieved {len(retrieved_docs)} document(s) for question: '{question}'")
+    # ❌ No answer found, search across all indexes
+    all_faiss_indexes = list_faiss_indexes()
+    combined_vectorstore = None
 
-    if not retrieved_docs:
-        return "I couldn't find relevant information in the document."
+    for index in all_faiss_indexes:
+        faiss_index = FAISS.load_local(
+            index_name=index,
+            folder_path=folder_path,
+            embeddings=bedrock_embeddings,
+            allow_dangerous_deserialization=True
+        )
 
-    # Extract document sources
-    source_files = set()
-    for doc in retrieved_docs:
-        if "source" in doc.metadata:
-            source_files.add(doc.metadata["source"])
+        if combined_vectorstore is None:
+            combined_vectorstore = faiss_index
+        else:
+            combined_vectorstore.merge_from(faiss_index)
 
-    # Format sources for display
-    source_text = "\n\n📄 Sources: " + ", ".join(source_files) if source_files else ""
+    if combined_vectorstore:
+        qa = RetrievalQA.from_chain_type(
+            llm=llm,
+            chain_type="stuff",
+            retriever=combined_vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5}),
+            return_source_documents=True,
+            chain_type_kwargs={"prompt": PROMPT}
+        )
 
-    return response["result"] + source_text
+        response = qa.invoke({"query": question})
+        retrieved_docs = response.get("source_documents", [])
+        
+        if retrieved_docs:
+            source_text = "\n\n📄 Not found in " + selected_doc + " but found in: " + ", ".join(set(doc.metadata["source"] for doc in retrieved_docs if "source" in doc.metadata))
+            return response["result"] + source_text
+
+    return "I couldn't find relevant information in any document."
 
 # Main Streamlit App
 def main():
@@ -167,26 +187,19 @@ def main():
             pages = loader.load_and_split()
 
             splitted_docs = split_text(pages)
+            create_vector_store(clean_name, splitted_docs)
+            st.success(f"Successfully processed {uploaded_file.name}!")
 
-            # Process & create FAISS index only ONCE
-            if clean_name not in list_faiss_indexes():
-                create_vector_store(clean_name, splitted_docs)
-                st.success(f"Successfully processed {uploaded_file.name}!")
-
-    # Question Answering Section (Separate from Uploading)
+    # Question Answering Section
     st.subheader("Ask Questions from the Knowledge Base")
 
     faiss_indexes = list_faiss_indexes()
-
     if not faiss_indexes:
         st.error("No FAISS indexes found in S3. Please upload PDFs first.")
         return
 
     selected_index = st.selectbox("Select a FAISS index", faiss_indexes)
-
-    # Dynamic Placeholder with Document Name
-    question_placeholder = f"Ask a question about {selected_index}" if selected_index else "Ask a question"
-    question = st.text_input(question_placeholder)
+    question = st.text_input(f"Ask a question about {selected_index}")
 
     if st.button("Ask Question"):
         with st.spinner("Finding the best answer..."):
@@ -197,7 +210,7 @@ def main():
                 allow_dangerous_deserialization=True
             )
 
-            answer = get_response(get_llm(), faiss_index, question)
+            answer = get_response(get_llm(), faiss_index, selected_index, question)
 
         st.success("Here's the answer:")
         st.write(answer)
