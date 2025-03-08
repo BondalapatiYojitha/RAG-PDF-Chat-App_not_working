@@ -97,9 +97,9 @@ def create_vector_store(file_name, documents):
 def get_llm():
     return Bedrock(model_id="anthropic.claude-v2:1", client=bedrock_client, model_kwargs={'max_tokens_to_sample': 512})
 
-# Retrieve answers using FAISS (Fixed to Prevent Infinite Loop)
+# Retrieve answers using FAISS and show source documents
 def get_response(llm, vectorstore, question):
-    """Retrieve answers using FAISS without infinite loops and ensure document retrieval."""
+    """Retrieve answers using FAISS and display source documents."""
     prompt_template = """
     Human: Please use the given context to provide a concise answer to the question.
     If you don't know the answer, just say you don't know.
@@ -123,17 +123,28 @@ def get_response(llm, vectorstore, question):
         chain_type_kwargs={"prompt": PROMPT}
     )
 
-    # ✅ FIX: Ensure documents are retrieved before answering
+    # Retrieve documents from FAISS
     response = qa.invoke({"query": question})
-    
-    # Debugging: Print retrieved documents
+
+    # Extract retrieved documents
     retrieved_docs = response.get("source_documents", [])
-    st.write(f"🔍 Retrieved {len(retrieved_docs)} document(s) from FAISS for question: '{question}'")
-    
+
+    # Debugging: Print retrieved documents
+    st.write(f"🔍 Retrieved {len(retrieved_docs)} document(s) for question: '{question}'")
+
     if not retrieved_docs:
         return "I couldn't find relevant information in the document."
 
-    return response["result"]
+    # Extract document sources
+    source_files = set()
+    for doc in retrieved_docs:
+        if "source" in doc.metadata:
+            source_files.add(doc.metadata["source"])
+
+    # Format sources for display
+    source_text = "\n\n📄 Sources: " + ", ".join(source_files) if source_files else ""
+
+    return response["result"] + source_text
 
 # Main Streamlit App
 def main():
