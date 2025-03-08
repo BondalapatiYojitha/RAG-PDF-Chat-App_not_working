@@ -70,12 +70,17 @@ def merge_all_indexes(excluded_index=None):
         if index == excluded_index:
             continue  # Skip the already searched document
 
-        faiss_index = load_faiss_index(index)
+        try:
+            faiss_index = load_faiss_index(index)
 
-        if combined_vectorstore is None:
-            combined_vectorstore = faiss_index
-        else:
-            combined_vectorstore.merge_from(faiss_index)
+            if combined_vectorstore is None:
+                combined_vectorstore = faiss_index
+            else:
+                combined_vectorstore.merge_from(faiss_index)
+
+        except Exception as e:
+            st.error(f"Error loading FAISS index {index}: {e}")
+            continue
 
     return combined_vectorstore
 
