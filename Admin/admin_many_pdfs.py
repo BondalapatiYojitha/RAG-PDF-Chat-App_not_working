@@ -25,7 +25,7 @@ bedrock_client = boto3.client(
     service_name="bedrock-runtime",
     region_name=aws_region,
     aws_access_key_id=aws_access_key,
-    aws_secret_access_key=aws_secret_key
+    aws_access_key_id=aws_secret_key
 )
 
 # LangChain Imports
@@ -43,6 +43,11 @@ bedrock_embeddings = BedrockEmbeddings(
 # Function to clean file names (removes spaces & special characters)
 def clean_file_name(file_name):
     return "".join(c if c.isalnum() or c in ('.', '_') else "_" for c in file_name)
+
+# Split text into chunks
+def split_text(pages, chunk_size=1000, chunk_overlap=200):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    return text_splitter.split_documents(pages)
 
 # Check if FAISS index exists in S3
 def vector_store_exists(file_name):
@@ -101,9 +106,9 @@ def main():
 
     if uploaded_files:
         for uploaded_file in uploaded_files:
-            original_file_name = os.path.splitext(uploaded_file.name)[0]  # Get file name without extension
-            clean_name = clean_file_name(original_file_name)  # Clean file name
-            
+            original_file_name = os.path.splitext(uploaded_file.name)[0]
+            clean_name = clean_file_name(original_file_name)
+
             st.write(f"Processing PDF: {uploaded_file.name}")
             st.write(f"File Identifier: {clean_name}")
 
