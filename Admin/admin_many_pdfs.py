@@ -111,8 +111,9 @@ def create_vector_store(file_name, documents):
 def get_llm():
     return Bedrock(model_id="anthropic.claude-v2:1", client=bedrock_client, model_kwargs={'max_tokens_to_sample': 512})
 
-# Retrieve answers using FAISS
+# Retrieve answers using FAISS (Fixed to Prevent Infinite Loop)
 def get_response(llm, vectorstore, question):
+    """Retrieve answers using FAISS without infinite loops."""
     prompt_template = """
     Human: Please use the given context to provide a concise answer to the question.
     If you don't know the answer, just say you don't know.
@@ -136,8 +137,9 @@ def get_response(llm, vectorstore, question):
         chain_type_kwargs={"prompt": PROMPT}
     )
 
-    answer = qa({"query": question})
-    return answer['result']
+    # ✅ FIX: Prevent infinite looping by using `.invoke()`
+    response = qa.invoke({"query": question})
+    return response["result"]
 
 # Main Streamlit App
 def main():
@@ -174,28 +176,22 @@ def main():
 
     selected_index = st.selectbox("Select a FAISS index", faiss_indexes)
 
-    # Ensure FAISS index is downloaded
-    faiss_index_path = os.path.join(folder_path, f"{selected_index}.faiss")
-
-    if not os.path.exists(faiss_index_path):
-        st.warning(f"Downloading FAISS index: {selected_index} from S3...")
-        s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.faiss", faiss_index_path)
-        s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.pkl", os.path.join(folder_path, f"{selected_index}.pkl"))
-
-    st.success(f"Loaded index: {selected_index}")
-
     # Dynamic Placeholder with Document Name
     question_placeholder = f"Ask a question about {selected_index}" if selected_index else "Ask a question"
     question = st.text_input(question_placeholder)
 
     if st.button("Ask Question"):
-        faiss_index = FAISS.load_local(
-            index_name=selected_index,
-            folder_path=folder_path,
-            embeddings=bedrock_embeddings,
-            allow_dangerous_deserialization=True
-        )
-        answer = get_response(get_llm(), faiss_index, question)
+        with st.spinner("Finding the best answer..."):
+            faiss_index = FAISS.load_local(
+                index_name=selected_index,
+                folder_path=folder_path,
+                embeddings=bedrock_embeddings,
+                allow_dangerous_deserialization=True
+            )
+
+            answer = get_response(get_llm(), faiss_index, question)
+
+        st.success("Here's the answer:")
         st.write(answer)
 
 if __name__ == "__main__":
