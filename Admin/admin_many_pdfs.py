@@ -16,10 +16,6 @@ aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
 aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
 aws_region = os.getenv("AWS_REGION", "us-east-1")
 
-# Validate AWS Credentials
-if not aws_access_key or not aws_secret_key:
-    st.error("AWS credentials are missing! Please configure them in your environment.")
-
 # Initialize Bedrock Client
 bedrock_client = boto3.client(
     service_name="bedrock-runtime",
@@ -167,30 +163,21 @@ def main():
     # Question Answering Section
     st.subheader("Ask Questions from the Knowledge Base")
 
-    faiss_indexes = [f for f in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, f))]
-    if not faiss_indexes:
-        st.error("No FAISS indexes found. Please upload PDFs first.")
-        return
-
+    faiss_indexes = list_faiss_indexes()
     selected_index = st.selectbox("Select a FAISS index", faiss_indexes)
 
-    if st.button("Load Index"):
-        st.write(f"Loading FAISS Index: {selected_index}")
-        faiss_index = FAISS.load_local(
-            index_name=selected_index,
-            folder_path=folder_path,
-            embeddings=bedrock_embeddings,
-            allow_dangerous_deserialization=True
-        )
-        st.success(f"Loaded index: {selected_index}")
+    faiss_index_path = os.path.join(folder_path, selected_index, "index.faiss")
 
-    # ✅ Dynamic Placeholder with Document Name
-    question_placeholder = f"Ask a question about {selected_index}" if selected_index else "Ask a question"
-    question = st.text_input(question_placeholder)
+    if not os.path.exists(faiss_index_path):
+        st.error(f"FAISS index file not found: {faiss_index_path}. Please upload the document first.")
+        return
+
+    # Load FAISS safely
+    faiss_index = FAISS.load_local(selected_index, folder_path, bedrock_embeddings, allow_dangerous_deserialization=True)
+    question = st.text_input(f"Ask a question about {selected_index}")
 
     if st.button("Ask Question"):
-        llm = get_llm()
-        answer = get_response(llm, faiss_index, question)
+        answer = get_response(get_llm(), faiss_index, question)
         st.write(answer)
 
 if __name__ == "__main__":
