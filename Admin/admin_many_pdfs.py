@@ -59,7 +59,6 @@ def vector_store_exists(request_id):
 
 # Merge FAISS vector stores correctly
 def merge_vector_stores(existing_faiss, new_faiss):
-    """Merge new FAISS index into an existing FAISS index"""
     texts = [new_faiss.docstore[i] for i in new_faiss.index_to_docstore_id.keys()]
     vectors = list(new_faiss.index_to_docstore_id.keys())
     existing_faiss.add_texts(texts, vectors)
@@ -68,45 +67,34 @@ def merge_vector_stores(existing_faiss, new_faiss):
 def create_vector_store(request_id, documents):
     local_folder = "/tmp"
     faiss_folder = os.path.join(local_folder, request_id)
-    faiss_path = os.path.join(faiss_folder, "index")
-    pkl_path = os.path.join(faiss_folder, "index.pkl")
-
-    # ✅ Ensure directory exists
     os.makedirs(faiss_folder, exist_ok=True)
 
-    # ✅ Ensure FAISS index is created before uploading
+    faiss_index_path = os.path.join(faiss_folder, "index")
+    pkl_path = os.path.join(faiss_folder, "index.pkl")
+
     if vector_store_exists(request_id):
-        # Download existing FAISS index
-        s3_client.download_file(BUCKET_NAME, f"faiss_files/{request_id}.faiss", faiss_path)
+        s3_client.download_file(BUCKET_NAME, f"faiss_files/{request_id}.faiss", faiss_index_path + ".faiss")
         s3_client.download_file(BUCKET_NAME, f"faiss_files/{request_id}.pkl", pkl_path)
 
-        # Load existing FAISS
         existing_vectorstore = FAISS.load_local(index_name="index", folder_path=faiss_folder, embeddings=bedrock_embeddings)
-
-        # Create new FAISS from documents
         new_vectorstore = FAISS.from_documents(documents, bedrock_embeddings)
 
-        # ✅ Merge new vectors into existing FAISS index
         merge_vector_stores(existing_vectorstore, new_vectorstore)
 
-        # ✅ Save merged FAISS index
         existing_vectorstore.save_local(index_name="index", folder_path=faiss_folder)
 
     else:
-        # ✅ Create a new FAISS index if none exists
         vectorstore_faiss = FAISS.from_documents(documents, bedrock_embeddings)
         vectorstore_faiss.save_local(index_name="index", folder_path=faiss_folder)
 
-    # ✅ Ensure FAISS files exist before uploading
-    if not os.path.exists(faiss_path):
-        raise FileNotFoundError(f"FAISS index file not found: {faiss_path}")
+    if not os.path.exists(faiss_index_path + ".faiss"):
+        raise FileNotFoundError(f"FAISS index file not found: {faiss_index_path}.faiss")
 
     if not os.path.exists(pkl_path):
         with open(pkl_path, "wb") as f:
-            pass  # Create an empty file
+            pass  
 
-    # ✅ Upload FAISS files to S3
-    s3_client.upload_file(faiss_path, BUCKET_NAME, f"faiss_files/{request_id}.faiss")
+    s3_client.upload_file(faiss_index_path + ".faiss", BUCKET_NAME, f"faiss_files/{request_id}.faiss")
     s3_client.upload_file(pkl_path, BUCKET_NAME, f"faiss_files/{request_id}.pkl")
 
     return True
@@ -135,11 +123,9 @@ def main():
 
             st.write(f"Total Pages: {len(pages)}")
 
-            # Split Text
             splitted_docs = split_text(pages)
             st.write(f"Splitted Docs: {len(splitted_docs)}")
 
-            # Process & Store Vectors
             st.write("Creating the Vector Store...")
             try:
                 result = create_vector_store(request_id, splitted_docs)
