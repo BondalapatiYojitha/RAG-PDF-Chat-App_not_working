@@ -63,12 +63,6 @@ def vector_store_exists(file_name):
     except:
         return False
 
-# Merge FAISS vector stores correctly
-def merge_vector_stores(existing_faiss, new_faiss):
-    texts = [new_faiss.docstore[i] for i in new_faiss.index_to_docstore_id.keys()]
-    vectors = list(new_faiss.index_to_docstore_id.keys())
-    existing_faiss.add_texts(texts, vectors)
-
 # Create or Update FAISS Vector Store
 def create_vector_store(file_name, documents):
     local_folder = "/tmp"
@@ -82,10 +76,16 @@ def create_vector_store(file_name, documents):
         s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.faiss", faiss_index_path + ".faiss")
         s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.pkl", pkl_path)
 
-        existing_vectorstore = FAISS.load_local(index_name="index", folder_path=faiss_folder, embeddings=bedrock_embeddings)
-        new_vectorstore = FAISS.from_documents(documents, bedrock_embeddings)
+        # FIX: Load FAISS safely with deserialization enabled
+        existing_vectorstore = FAISS.load_local(
+            index_name="index",
+            folder_path=faiss_folder,
+            embeddings=bedrock_embeddings,
+            allow_dangerous_deserialization=True
+        )
 
-        merge_vector_stores(existing_vectorstore, new_vectorstore)
+        new_vectorstore = FAISS.from_documents(documents, bedrock_embeddings)
+        existing_vectorstore.merge_from(new_vectorstore)
 
         existing_vectorstore.save_local(index_name="index", folder_path=faiss_folder)
 
@@ -93,61 +93,8 @@ def create_vector_store(file_name, documents):
         vectorstore_faiss = FAISS.from_documents(documents, bedrock_embeddings)
         vectorstore_faiss.save_local(index_name="index", folder_path=faiss_folder)
 
-    if not os.path.exists(faiss_index_path + ".faiss"):
-        raise FileNotFoundError(f"FAISS index file not found: {faiss_index_path}.faiss")
-
-    if not os.path.exists(pkl_path):
-        with open(pkl_path, "wb") as f:
-            pass  
-
     s3_client.upload_file(faiss_index_path + ".faiss", BUCKET_NAME, f"faiss_files/{file_name}.faiss")
     s3_client.upload_file(pkl_path, BUCKET_NAME, f"faiss_files/{file_name}.pkl")
-
-    return True
-
-# Function to list FAISS indexes in S3
-def list_faiss_indexes():
-    response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="faiss_files/")
-    if "Contents" in response:
-        return sorted(set(obj["Key"].split("/")[-1].split(".")[0] for obj in response["Contents"]))
-    return []
-
-# Function to download a selected FAISS index from S3
-def load_selected_index(selected_index):
-    s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.faiss", f"{folder_path}{selected_index}.faiss")
-    s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.pkl", f"{folder_path}{selected_index}.pkl")
-
-# Initialize the LLM
-def get_llm():
-    return Bedrock(model_id="anthropic.claude-v2:1", client=bedrock_client, model_kwargs={'max_tokens_to_sample': 512})
-
-# Retrieve answers using FAISS
-def get_response(llm, vectorstore, question):
-    prompt_template = """
-    Human: Please use the given context to provide a concise answer to the question.
-    If you don't know the answer, just say you don't know.
-    
-    <context>
-    {context}
-    </context>
-
-    Question: {question}
-    
-    Assistant:
-    """
-
-    PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-
-    qa = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5}),
-        return_source_documents=True,
-        chain_type_kwargs={"prompt": PROMPT}
-    )
-
-    answer = qa({"query": question})
-    return answer['result']
 
 # Main Streamlit App
 def main():
@@ -170,14 +117,13 @@ def main():
             pages = loader.load_and_split()
 
             splitted_docs = split_text(pages)
-
             create_vector_store(clean_name, splitted_docs)
             st.success(f"Successfully processed {uploaded_file.name}!")
 
     # Question Answering Section
     st.subheader("Ask Questions from the Knowledge Base")
 
-    faiss_indexes = list_faiss_indexes()
+    faiss_indexes = [f for f in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, f))]
     if not faiss_indexes:
         st.error("No FAISS indexes found. Please upload PDFs first.")
         return
@@ -185,14 +131,26 @@ def main():
     selected_index = st.selectbox("Select a FAISS index", faiss_indexes)
 
     if st.button("Load Index"):
-        load_selected_index(selected_index)
+        st.write(f"Loading FAISS Index: {selected_index}")
+        faiss_index = FAISS.load_local(
+            index_name=selected_index,
+            folder_path=folder_path,
+            embeddings=bedrock_embeddings,
+            allow_dangerous_deserialization=True  # FIX: Enable safe deserialization
+        )
         st.success(f"Loaded index: {selected_index}")
 
     question = st.text_input("Ask a question about your document")
     if st.button("Ask Question"):
-        llm = get_llm()
-        faiss_index = FAISS.load_local(selected_index, folder_path, bedrock_embeddings)
-        answer = get_response(llm, faiss_index, question)
+        llm = Bedrock(model_id="anthropic.claude-v2:1", client=bedrock_client, model_kwargs={'max_tokens_to_sample': 512})
+
+        answer = RetrievalQA.from_chain_type(
+            llm=llm,
+            chain_type="stuff",
+            retriever=faiss_index.as_retriever(search_type="similarity", search_kwargs={"k": 5}),
+            return_source_documents=True
+        ).run(question)
+
         st.write(answer)
 
 if __name__ == "__main__":
