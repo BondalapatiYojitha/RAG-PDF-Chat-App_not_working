@@ -114,9 +114,8 @@ def list_faiss_indexes():
 
 # Function to download a selected FAISS index from S3
 def load_selected_index(selected_index):
-    st.write(f"Loading FAISS Index: {selected_index}")
-    s3_client.download_file(Bucket=BUCKET_NAME, Key=f"faiss_files/{selected_index}.faiss", Filename=f"{folder_path}{selected_index}.faiss")
-    s3_client.download_file(Bucket=BUCKET_NAME, Key=f"faiss_files/{selected_index}.pkl", Filename=f"{folder_path}{selected_index}.pkl")
+    s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.faiss", f"{folder_path}{selected_index}.faiss")
+    s3_client.download_file(BUCKET_NAME, f"faiss_files/{selected_index}.pkl", f"{folder_path}{selected_index}.pkl")
 
 # Initialize the LLM
 def get_llm():
@@ -124,8 +123,6 @@ def get_llm():
 
 # Retrieve answers using FAISS
 def get_response(llm, vectorstore, question):
-    st.write(f"Analyzing your question: {question}")
-
     prompt_template = """
     Human: Please use the given context to provide a concise answer to the question.
     If you don't know the answer, just say you don't know.
@@ -154,52 +151,49 @@ def get_response(llm, vectorstore, question):
 
 # Main Streamlit App
 def main():
-    st.title("Chat with Your PDF (Admin & Client)")
+    st.title("Chat with Your PDF")
 
-    # Mode Selection
-    mode = st.radio("Select Mode", ["Admin Mode", "Client Mode"])
+    # File Upload Section
+    st.subheader("Upload PDF to Add to the Knowledge Base")
+    uploaded_files = st.file_uploader("Choose PDFs", type="pdf", accept_multiple_files=True)
 
-    if mode == "Admin Mode":
-        st.header("Admin Panel - Upload PDFs")
-        uploaded_files = st.file_uploader("Choose PDFs", type="pdf", accept_multiple_files=True)
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            original_file_name = os.path.splitext(uploaded_file.name)[0]
+            clean_name = clean_file_name(original_file_name)
 
-        if uploaded_files:
-            for uploaded_file in uploaded_files:
-                original_file_name = os.path.splitext(uploaded_file.name)[0]
-                clean_name = clean_file_name(original_file_name)
+            saved_file_name = os.path.join("/tmp", f"{clean_name}.pdf")
+            with open(saved_file_name, "wb") as f:
+                f.write(uploaded_file.getvalue())
 
-                st.write(f"Processing PDF: {uploaded_file.name}")
-                st.write(f"File Identifier: {clean_name}")
+            loader = PyPDFLoader(saved_file_name)
+            pages = loader.load_and_split()
 
-                saved_file_name = os.path.join("/tmp", f"{clean_name}.pdf")
-                with open(saved_file_name, "wb") as f:
-                    f.write(uploaded_file.getvalue())
+            splitted_docs = split_text(pages)
 
-                loader = PyPDFLoader(saved_file_name)
-                pages = loader.load_and_split()
+            create_vector_store(clean_name, splitted_docs)
+            st.success(f"Successfully processed {uploaded_file.name}!")
 
-                splitted_docs = split_text(pages)
-                st.write(f"Splitted Docs: {len(splitted_docs)}")
+    # Question Answering Section
+    st.subheader("Ask Questions from the Knowledge Base")
 
-                st.write("Creating the Vector Store...")
-                create_vector_store(clean_name, splitted_docs)
-                st.success(f"Successfully processed {uploaded_file.name}!")
+    faiss_indexes = list_faiss_indexes()
+    if not faiss_indexes:
+        st.error("No FAISS indexes found. Please upload PDFs first.")
+        return
 
-    elif mode == "Client Mode":
-        st.header("Client Panel - Ask Questions")
+    selected_index = st.selectbox("Select a FAISS index", faiss_indexes)
 
-        faiss_indexes = list_faiss_indexes()
-        selected_index = st.selectbox("Select a FAISS index", faiss_indexes)
+    if st.button("Load Index"):
+        load_selected_index(selected_index)
+        st.success(f"Loaded index: {selected_index}")
 
-        if st.button("Load Index"):
-            load_selected_index(selected_index)
-            st.success(f"Loaded index: {selected_index}")
-
-        question = st.text_input("Ask a question about your document")
-        if st.button("Ask Question"):
-            llm = get_llm()
-            answer = get_response(llm, FAISS.load_local(selected_index, folder_path, bedrock_embeddings), question)
-            st.write(answer)
+    question = st.text_input("Ask a question about your document")
+    if st.button("Ask Question"):
+        llm = get_llm()
+        faiss_index = FAISS.load_local(selected_index, folder_path, bedrock_embeddings)
+        answer = get_response(llm, faiss_index, question)
+        st.write(answer)
 
 if __name__ == "__main__":
     main()
