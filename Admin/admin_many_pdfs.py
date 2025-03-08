@@ -3,8 +3,6 @@ import boto3
 import streamlit as st
 from langchain_community.embeddings import BedrockEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_aws import BedrockEmbeddings
 from langchain.llms.bedrock import Bedrock
 from langchain.prompts import PromptTemplate
@@ -34,35 +32,43 @@ folder_path = "/tmp/"
 
 # Fetch FAISS indexes from S3 and download them locally
 def list_faiss_indexes():
+    """Fetch and list FAISS indexes from S3, ensuring they are downloaded locally."""
     response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="faiss_files/")
+    
     if "Contents" in response:
         indexes = sorted(set(obj["Key"].split("/")[-1].split(".")[0] for obj in response["Contents"] if obj["Key"].endswith(".faiss")))
-        
+
         # Ensure each index is downloaded locally
         for index in indexes:
             local_faiss_path = os.path.join(folder_path, f"{index}.faiss")
             local_pkl_path = os.path.join(folder_path, f"{index}.pkl")
-            
+
             if not os.path.exists(local_faiss_path):
                 s3_client.download_file(BUCKET_NAME, f"faiss_files/{index}.faiss", local_faiss_path)
-            
+
             if not os.path.exists(local_pkl_path):
                 s3_client.download_file(BUCKET_NAME, f"faiss_files/{index}.pkl", local_pkl_path)
-        
+
         return indexes
     return []
 
 # Load FAISS index from local storage
 def load_faiss_index(index_name):
-    return FAISS.load_local(
-        index_name=index_name,
-        folder_path=folder_path,
-        embeddings=bedrock_embeddings,
-        allow_dangerous_deserialization=True
-    )
+    """Load a FAISS index from the local folder."""
+    try:
+        return FAISS.load_local(
+            index_name=index_name,
+            folder_path=folder_path,
+            embeddings=bedrock_embeddings,
+            allow_dangerous_deserialization=True
+        )
+    except Exception as e:
+        st.error(f"Error loading FAISS index {index_name}: {e}")
+        return None
 
 # Merge all FAISS indexes into a single vectorstore
 def merge_all_indexes(excluded_index=None):
+    """Merge all FAISS indexes into a single searchable vectorstore."""
     all_faiss_indexes = list_faiss_indexes()
     combined_vectorstore = None
 
@@ -70,22 +76,19 @@ def merge_all_indexes(excluded_index=None):
         if index == excluded_index:
             continue  # Skip the already searched document
 
-        try:
-            faiss_index = load_faiss_index(index)
+        faiss_index = load_faiss_index(index)
 
+        if faiss_index:
             if combined_vectorstore is None:
                 combined_vectorstore = faiss_index
             else:
                 combined_vectorstore.merge_from(faiss_index)
 
-        except Exception as e:
-            st.error(f"Error loading FAISS index {index}: {e}")
-            continue
-
     return combined_vectorstore
 
 # Initialize LLM
 def get_llm():
+    """Get a Bedrock LLM instance."""
     return Bedrock(model_id="anthropic.claude-v2:1", client=bedrock_client, model_kwargs={'max_tokens_to_sample': 512})
 
 # Perform retrieval and generate response
@@ -94,13 +97,13 @@ def get_response(llm, vectorstore, question):
     prompt_template = """
     Human: Please use the given context to provide a concise answer to the question.
     If you don't know the answer, just say you don't know.
-    
+
     <context>
     {context}
     </context>
 
     Question: {question}
-    
+
     Assistant:
     """
 
@@ -138,13 +141,15 @@ def main():
         with st.spinner("Finding the best answer..."):
             # Step 1: Search in Selected Document
             selected_vectorstore = load_faiss_index(selected_index)
-            response, retrieved_docs = get_response(get_llm(), selected_vectorstore, question)
 
-            if retrieved_docs:
-                source_text = "\n\n📄 Answer found in: " + selected_index
-                st.success("Here's the answer:")
-                st.write(response["result"] + source_text)
-                return  # ✅ Exit since we found the answer in the selected document
+            if selected_vectorstore:
+                response, retrieved_docs = get_response(get_llm(), selected_vectorstore, question)
+
+                if retrieved_docs:
+                    source_text = "\n\n📄 Answer found in: " + selected_index
+                    st.success("Here's the answer:")
+                    st.write(response["result"] + source_text)
+                    return  # ✅ Exit since we found the answer in the selected document
 
             # Step 2: Search in All Documents
             st.warning("Answer not found in selected document. Searching all indexes...")
