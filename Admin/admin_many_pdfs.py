@@ -33,12 +33,18 @@ from langchain_community.embeddings import BedrockEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
+from langchain_aws import BedrockEmbeddings
+from langchain.llms.bedrock import Bedrock
+from langchain.prompts import PromptTemplate
+from langchain.chains import RetrievalQA
 
 # Initialize Bedrock Embeddings
 bedrock_embeddings = BedrockEmbeddings(
     model_id="amazon.titan-embed-text-v1",
     client=bedrock_client
 )
+
+folder_path = "/tmp/"
 
 # Function to clean file names (removes spaces & special characters)
 def clean_file_name(file_name):
@@ -99,44 +105,101 @@ def create_vector_store(file_name, documents):
 
     return True
 
-# Streamlit UI
+# Function to list FAISS indexes in S3
+def list_faiss_indexes():
+    response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="faiss_files/")
+    if "Contents" in response:
+        return sorted(set(obj["Key"].split("/")[-1].split(".")[0] for obj in response["Contents"]))
+    return []
+
+# Function to download a selected FAISS index from S3
+def load_selected_index(selected_index):
+    st.write(f"Loading FAISS Index: {selected_index}")
+    s3_client.download_file(Bucket=BUCKET_NAME, Key=f"faiss_files/{selected_index}.faiss", Filename=f"{folder_path}{selected_index}.faiss")
+    s3_client.download_file(Bucket=BUCKET_NAME, Key=f"faiss_files/{selected_index}.pkl", Filename=f"{folder_path}{selected_index}.pkl")
+
+# Initialize the LLM
+def get_llm():
+    return Bedrock(model_id="anthropic.claude-v2:1", client=bedrock_client, model_kwargs={'max_tokens_to_sample': 512})
+
+# Retrieve answers using FAISS
+def get_response(llm, vectorstore, question):
+    st.write(f"Analyzing your question: {question}")
+
+    prompt_template = """
+    Human: Please use the given context to provide a concise answer to the question.
+    If you don't know the answer, just say you don't know.
+    
+    <context>
+    {context}
+    </context>
+
+    Question: {question}
+    
+    Assistant:
+    """
+
+    PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+
+    qa = RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",
+        retriever=vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5}),
+        return_source_documents=True,
+        chain_type_kwargs={"prompt": PROMPT}
+    )
+
+    answer = qa({"query": question})
+    return answer['result']
+
+# Main Streamlit App
 def main():
-    st.title("Admin Panel for Chat with PDF")
-    uploaded_files = st.file_uploader("Choose PDFs", type="pdf", accept_multiple_files=True)
+    st.title("Chat with Your PDF (Admin & Client)")
 
-    if uploaded_files:
-        for uploaded_file in uploaded_files:
-            original_file_name = os.path.splitext(uploaded_file.name)[0]
-            clean_name = clean_file_name(original_file_name)
+    # Mode Selection
+    mode = st.radio("Select Mode", ["Admin Mode", "Client Mode"])
 
-            st.write(f"Processing PDF: {uploaded_file.name}")
-            st.write(f"File Identifier: {clean_name}")
+    if mode == "Admin Mode":
+        st.header("Admin Panel - Upload PDFs")
+        uploaded_files = st.file_uploader("Choose PDFs", type="pdf", accept_multiple_files=True)
 
-            saved_file_name = os.path.join("/tmp", f"{clean_name}.pdf")
-            with open(saved_file_name, "wb") as f:
-                f.write(uploaded_file.getvalue())
+        if uploaded_files:
+            for uploaded_file in uploaded_files:
+                original_file_name = os.path.splitext(uploaded_file.name)[0]
+                clean_name = clean_file_name(original_file_name)
 
-            try:
+                st.write(f"Processing PDF: {uploaded_file.name}")
+                st.write(f"File Identifier: {clean_name}")
+
+                saved_file_name = os.path.join("/tmp", f"{clean_name}.pdf")
+                with open(saved_file_name, "wb") as f:
+                    f.write(uploaded_file.getvalue())
+
                 loader = PyPDFLoader(saved_file_name)
                 pages = loader.load_and_split()
-            except Exception as e:
-                st.error(f"Error processing {uploaded_file.name}: {e}")
-                continue
 
-            st.write(f"Total Pages: {len(pages)}")
+                splitted_docs = split_text(pages)
+                st.write(f"Splitted Docs: {len(splitted_docs)}")
 
-            splitted_docs = split_text(pages)
-            st.write(f"Splitted Docs: {len(splitted_docs)}")
+                st.write("Creating the Vector Store...")
+                create_vector_store(clean_name, splitted_docs)
+                st.success(f"Successfully processed {uploaded_file.name}!")
 
-            st.write("Creating the Vector Store...")
-            try:
-                result = create_vector_store(clean_name, splitted_docs)
-                if result:
-                    st.success(f"Successfully processed {uploaded_file.name}!")
-                else:
-                    st.error(f"Error processing {uploaded_file.name}!")
-            except Exception as e:
-                st.error(f"Error during vector store creation: {e}")
+    elif mode == "Client Mode":
+        st.header("Client Panel - Ask Questions")
+
+        faiss_indexes = list_faiss_indexes()
+        selected_index = st.selectbox("Select a FAISS index", faiss_indexes)
+
+        if st.button("Load Index"):
+            load_selected_index(selected_index)
+            st.success(f"Loaded index: {selected_index}")
+
+        question = st.text_input("Ask a question about your document")
+        if st.button("Ask Question"):
+            llm = get_llm()
+            answer = get_response(llm, FAISS.load_local(selected_index, folder_path, bedrock_embeddings), question)
+            st.write(answer)
 
 if __name__ == "__main__":
     main()
