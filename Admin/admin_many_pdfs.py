@@ -99,7 +99,7 @@ def get_llm():
 
 # Retrieve answers using FAISS (Fixed to Prevent Infinite Loop)
 def get_response(llm, vectorstore, question):
-    """Retrieve answers using FAISS without infinite loops."""
+    """Retrieve answers using FAISS without infinite loops and ensure document retrieval."""
     prompt_template = """
     Human: Please use the given context to provide a concise answer to the question.
     If you don't know the answer, just say you don't know.
@@ -123,8 +123,16 @@ def get_response(llm, vectorstore, question):
         chain_type_kwargs={"prompt": PROMPT}
     )
 
-    # ✅ FIX: Prevent infinite looping by using `.invoke()`
+    # ✅ FIX: Ensure documents are retrieved before answering
     response = qa.invoke({"query": question})
+    
+    # Debugging: Print retrieved documents
+    retrieved_docs = response.get("source_documents", [])
+    st.write(f"🔍 Retrieved {len(retrieved_docs)} document(s) from FAISS for question: '{question}'")
+    
+    if not retrieved_docs:
+        return "I couldn't find relevant information in the document."
+
     return response["result"]
 
 # Main Streamlit App
