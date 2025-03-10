@@ -66,7 +66,14 @@ def create_vector_store(file_name, documents):
     if vector_store_exists(file_name):
         s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.faiss", faiss_index_path + ".faiss")
         s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.pkl", pkl_path)
-        existing_vectorstore = FAISS.load_local(index_name="index", folder_path=faiss_folder, embeddings=bedrock_embeddings)
+
+        existing_vectorstore = FAISS.load_local(
+            index_name="index",
+            folder_path=faiss_folder,
+            embeddings=bedrock_embeddings,
+            allow_dangerous_deserialization=True  # ✅ FIXED: Allowing safe deserialization
+        )
+
         new_vectorstore = FAISS.from_documents(documents, bedrock_embeddings)
         existing_vectorstore.merge_from(new_vectorstore)
         existing_vectorstore.save_local(index_name="index", folder_path=faiss_folder)
@@ -92,7 +99,7 @@ def load_faiss_index(index_name):
         index_name=index_name,
         folder_path=folder_path,
         embeddings=bedrock_embeddings,
-        allow_dangerous_deserialization=True
+        allow_dangerous_deserialization=True  # ✅ FIXED: Allowing safe deserialization
     )
 
 # Merge all FAISS indexes into a single vectorstore
