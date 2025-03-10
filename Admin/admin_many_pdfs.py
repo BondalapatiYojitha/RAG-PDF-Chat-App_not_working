@@ -122,16 +122,6 @@ def get_response(llm, vectorstore, question):
 
     return response, retrieved_docs
 
-# Extract source document names
-def extract_source_documents(retrieved_docs):
-    """Extracts and formats source document names from retrieved docs."""
-    sources = set()
-    for doc in retrieved_docs:
-        if "source" in doc.metadata:
-            sources.add(doc.metadata["source"])
-
-    return sources
-
 # Main Streamlit App
 def main():
     st.title("Chat with Your PDF")
@@ -156,8 +146,7 @@ def main():
                 response, retrieved_docs = get_response(get_llm(), selected_vectorstore, question)
 
                 if retrieved_docs:
-                    sources = extract_source_documents(retrieved_docs)
-                    source_text = f"\n\n📄 Answer found in: {', '.join(sources) if sources else selected_index}"
+                    source_text = "\n\n📄 Answer found in: " + selected_index
                     st.success("Here's the answer:")
                     st.write(response["result"] + source_text)
                     return  # ✅ Exit since we found the answer in the selected document
@@ -170,8 +159,8 @@ def main():
                 response, retrieved_docs = get_response(get_llm(), all_vectorstore, question)
 
                 if retrieved_docs:
-                    sources = extract_source_documents(retrieved_docs)
-                    source_text = f"\n\n📄 Answer found in: {', '.join(sources) if sources else 'Unknown Source'}"
+                    all_sources = set(doc.metadata["source"] for doc in retrieved_docs if "source" in doc.metadata)
+                    source_text = f"\n\n📄 Answer found in: {', '.join(all_sources)}"
                     st.success("Here's the answer:")
                     st.write(response["result"] + source_text)
                     return
