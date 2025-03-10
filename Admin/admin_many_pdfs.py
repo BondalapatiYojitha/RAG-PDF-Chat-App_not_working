@@ -46,14 +46,6 @@ def split_text(pages, chunk_size=1000, chunk_overlap=200):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     return text_splitter.split_documents(pages)
 
-# Check if FAISS index exists in S3
-def vector_store_exists(file_name):
-    try:
-        s3_client.head_object(Bucket=BUCKET_NAME, Key=f"faiss_files/{file_name}.faiss")
-        return True
-    except:
-        return False
-
 # Ensure FAISS index is downloaded
 def ensure_faiss_downloaded(index_name):
     """Ensures that the FAISS index files are downloaded before being used."""
@@ -85,16 +77,13 @@ def create_vector_store(file_name, documents):
     faiss_index_path = os.path.join(faiss_folder, "index")
     pkl_path = os.path.join(faiss_folder, "index.pkl")
 
-    if vector_store_exists(file_name):
-        ensure_faiss_downloaded(file_name)
-
+    if ensure_faiss_downloaded(file_name):
         existing_vectorstore = FAISS.load_local(
             index_name="index",
             folder_path=faiss_folder,
             embeddings=bedrock_embeddings,
-            allow_dangerous_deserialization=True  # ✅ FIXED: Safe deserialization
+            allow_dangerous_deserialization=True
         )
-
         new_vectorstore = FAISS.from_documents(documents, bedrock_embeddings)
         existing_vectorstore.merge_from(new_vectorstore)
         existing_vectorstore.save_local(index_name="index", folder_path=faiss_folder)
@@ -126,27 +115,17 @@ def load_faiss_index(index_name):
         )
     return None
 
-# Merge all FAISS indexes into a single vectorstore
-def merge_all_indexes(excluded_index=None):
-    all_faiss_indexes = list_faiss_indexes()
-    combined_vectorstore = None
-
-    for index in all_faiss_indexes:
-        if index == excluded_index:
-            continue  
-
-        faiss_index = load_faiss_index(index)
-        if faiss_index:
-            if combined_vectorstore is None:
-                combined_vectorstore = faiss_index
-            else:
-                combined_vectorstore.merge_from(faiss_index)
-
-    return combined_vectorstore
-
 # Initialize LLM
 def get_llm():
     return Bedrock(model_id="anthropic.claude-v2:1", client=bedrock_client, model_kwargs={'max_tokens_to_sample': 512})
+
+# Extract document sources
+def extract_source_documents(retrieved_docs):
+    sources = set()
+    for doc in retrieved_docs:
+        if "source" in doc.metadata:
+            sources.add(os.path.basename(doc.metadata["source"]))
+    return sources
 
 # Perform retrieval and generate response
 def get_response(llm, vectorstore, question):
@@ -182,6 +161,33 @@ def get_response(llm, vectorstore, question):
 def main():
     st.title("Chat with Your PDF")
 
+    # Upload PDFs
+    st.subheader("Upload PDFs to Create Searchable Index")
+    uploaded_files = st.file_uploader("Choose PDFs", type="pdf", accept_multiple_files=True)
+
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            original_file_name = os.path.splitext(uploaded_file.name)[0]
+            clean_name = clean_file_name(original_file_name)
+
+            st.write(f"Processing PDF: {uploaded_file.name}")
+
+            saved_file_name = os.path.join("/tmp", f"{clean_name}.pdf")
+            with open(saved_file_name, "wb") as f:
+                f.write(uploaded_file.getvalue())
+
+            try:
+                loader = PyPDFLoader(saved_file_name)
+                pages = loader.load_and_split()
+            except Exception as e:
+                st.error(f"Error processing {uploaded_file.name}: {e}")
+                continue
+
+            splitted_docs = split_text(pages)
+            st.write(f"Creating the Vector Store for {uploaded_file.name}...")
+            create_vector_store(clean_name, splitted_docs)
+            st.success(f"Successfully processed {uploaded_file.name}!")
+
     # Question Answering
     st.subheader("Ask Questions from the Knowledge Base")
 
@@ -196,17 +202,15 @@ def main():
     if st.button("Ask Question"):
         with st.spinner("Finding the best answer..."):
             selected_vectorstore = load_faiss_index(selected_index)
-            if selected_vectorstore:
-                response, retrieved_docs = get_response(get_llm(), selected_vectorstore, question)
+            response, retrieved_docs = get_response(get_llm(), selected_vectorstore, question)
 
-                if retrieved_docs:
-                    st.success("Here's the answer:")
-                    st.write(response["result"])
-                    return
+            if retrieved_docs:
+                sources = extract_source_documents(retrieved_docs)
+                st.success("Here's the answer:")
+                st.write(response["result"])
+                return
 
-                st.error(f"❌ Couldn't find relevant information in {selected_index} or any other document.")
-            else:
-                st.error(f"❌ FAISS index `{selected_index}` could not be loaded. Please check if it exists in S3.")
+            st.error(f"❌ Couldn't find relevant information in {selected_index} or any other document.")
 
 if __name__ == "__main__":
     main()
