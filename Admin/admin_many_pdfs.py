@@ -54,6 +54,28 @@ def vector_store_exists(file_name):
     except:
         return False
 
+# Ensure FAISS index is downloaded
+def ensure_faiss_downloaded(index_name):
+    """Ensures that the FAISS index files are downloaded before being used."""
+    local_faiss_path = os.path.join(folder_path, f"{index_name}.faiss")
+    local_pkl_path = os.path.join(folder_path, f"{index_name}.pkl")
+
+    # Download if missing
+    if not os.path.exists(local_faiss_path):
+        try:
+            s3_client.download_file(BUCKET_NAME, f"faiss_files/{index_name}.faiss", local_faiss_path)
+        except:
+            st.error(f"FAISS index file `{index_name}.faiss` not found in S3.")
+            return False
+
+    if not os.path.exists(local_pkl_path):
+        try:
+            s3_client.download_file(BUCKET_NAME, f"faiss_files/{index_name}.pkl", local_pkl_path)
+        except:
+            st.warning(f"Metadata file `{index_name}.pkl` is missing but proceeding without it.")
+
+    return True
+
 # Create FAISS Index
 def create_vector_store(file_name, documents):
     local_folder = "/tmp"
@@ -64,14 +86,13 @@ def create_vector_store(file_name, documents):
     pkl_path = os.path.join(faiss_folder, "index.pkl")
 
     if vector_store_exists(file_name):
-        s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.faiss", faiss_index_path + ".faiss")
-        s3_client.download_file(BUCKET_NAME, f"faiss_files/{file_name}.pkl", pkl_path)
+        ensure_faiss_downloaded(file_name)
 
         existing_vectorstore = FAISS.load_local(
             index_name="index",
             folder_path=faiss_folder,
             embeddings=bedrock_embeddings,
-            allow_dangerous_deserialization=True  # ✅ FIXED: Allowing safe deserialization
+            allow_dangerous_deserialization=True  # ✅ FIXED: Safe deserialization
         )
 
         new_vectorstore = FAISS.from_documents(documents, bedrock_embeddings)
@@ -95,12 +116,15 @@ def list_faiss_indexes():
 
 # Load FAISS index from local storage
 def load_faiss_index(index_name):
-    return FAISS.load_local(
-        index_name=index_name,
-        folder_path=folder_path,
-        embeddings=bedrock_embeddings,
-        allow_dangerous_deserialization=True  # ✅ FIXED: Allowing safe deserialization
-    )
+    """Load FAISS index after ensuring it is downloaded."""
+    if ensure_faiss_downloaded(index_name):
+        return FAISS.load_local(
+            index_name=index_name,
+            folder_path=folder_path,
+            embeddings=bedrock_embeddings,
+            allow_dangerous_deserialization=True
+        )
+    return None
 
 # Merge all FAISS indexes into a single vectorstore
 def merge_all_indexes(excluded_index=None):
@@ -112,10 +136,11 @@ def merge_all_indexes(excluded_index=None):
             continue  
 
         faiss_index = load_faiss_index(index)
-        if combined_vectorstore is None:
-            combined_vectorstore = faiss_index
-        else:
-            combined_vectorstore.merge_from(faiss_index)
+        if faiss_index:
+            if combined_vectorstore is None:
+                combined_vectorstore = faiss_index
+            else:
+                combined_vectorstore.merge_from(faiss_index)
 
     return combined_vectorstore
 
@@ -153,44 +178,9 @@ def get_response(llm, vectorstore, question):
     
     return response, retrieved_docs
 
-# Extract document sources
-def extract_source_documents(retrieved_docs):
-    sources = set()
-    for doc in retrieved_docs:
-        if "source" in doc.metadata:
-            sources.add(os.path.basename(doc.metadata["source"]))
-    return sources
-
 # Streamlit App
 def main():
     st.title("Chat with Your PDF")
-
-    # Upload PDFs
-    st.subheader("Upload PDFs to Create Searchable Index")
-    uploaded_files = st.file_uploader("Choose PDFs", type="pdf", accept_multiple_files=True)
-
-    if uploaded_files:
-        for uploaded_file in uploaded_files:
-            original_file_name = os.path.splitext(uploaded_file.name)[0]
-            clean_name = clean_file_name(original_file_name)
-
-            st.write(f"Processing PDF: {uploaded_file.name}")
-
-            saved_file_name = os.path.join("/tmp", f"{clean_name}.pdf")
-            with open(saved_file_name, "wb") as f:
-                f.write(uploaded_file.getvalue())
-
-            try:
-                loader = PyPDFLoader(saved_file_name)
-                pages = loader.load_and_split()
-            except Exception as e:
-                st.error(f"Error processing {uploaded_file.name}: {e}")
-                continue
-
-            splitted_docs = split_text(pages)
-            st.write(f"Creating the Vector Store for {uploaded_file.name}...")
-            create_vector_store(clean_name, splitted_docs)
-            st.success(f"Successfully processed {uploaded_file.name}!")
 
     # Question Answering
     st.subheader("Ask Questions from the Knowledge Base")
@@ -206,16 +196,17 @@ def main():
     if st.button("Ask Question"):
         with st.spinner("Finding the best answer..."):
             selected_vectorstore = load_faiss_index(selected_index)
-            response, retrieved_docs = get_response(get_llm(), selected_vectorstore, question)
+            if selected_vectorstore:
+                response, retrieved_docs = get_response(get_llm(), selected_vectorstore, question)
 
-            if retrieved_docs:
-                sources = extract_source_documents(retrieved_docs)
-                source_text = f"\n\n📄 Answer found in: {', '.join(sources) if sources else selected_index}"
-                st.success("Here's the answer:")
-                st.write(response["result"] + source_text)
-                return
+                if retrieved_docs:
+                    st.success("Here's the answer:")
+                    st.write(response["result"])
+                    return
 
-            st.error(f"❌ Couldn't find relevant information in {selected_index} or any other document.")
+                st.error(f"❌ Couldn't find relevant information in {selected_index} or any other document.")
+            else:
+                st.error(f"❌ FAISS index `{selected_index}` could not be loaded. Please check if it exists in S3.")
 
 if __name__ == "__main__":
     main()
