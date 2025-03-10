@@ -122,6 +122,10 @@ def load_faiss_index(index_name):
         )
     return None
 
+# Initialize LLM
+def get_llm():
+    return Bedrock(model_id="anthropic.claude-v2:1", client=bedrock_client, model_kwargs={'max_tokens_to_sample': 512})
+
 # Extract document sources
 def extract_source_documents(retrieved_docs):
     sources = set()
@@ -206,14 +210,8 @@ def main():
         with st.spinner("Finding the best answer..."):
             selected_vectorstore = load_faiss_index(selected_index)
             response, retrieved_docs = get_response(get_llm(), selected_vectorstore, question)
-
-            if retrieved_docs:
-                sources = extract_source_documents(retrieved_docs)
-                st.success("Here's the answer:")
-                st.write(response["result"])
-                return
-
-            st.error(f"❌ Couldn't find relevant information in {selected_index} or any other document.")
+            st.success("Here's the answer:")
+            st.write(response["result"])
 
 if __name__ == "__main__":
     main()
