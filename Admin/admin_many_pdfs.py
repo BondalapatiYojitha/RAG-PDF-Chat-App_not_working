@@ -83,9 +83,9 @@ def create_vector_store(file_name, documents):
     faiss_index_path = os.path.join(faiss_folder, "index")
     pkl_path = os.path.join(faiss_folder, "index.pkl")
 
-    # Check if FAISS already exists to avoid reprocessing
+    # Skip reprocessing if FAISS already exists
     if faiss_exists_in_s3(file_name):
-        st.warning(f"⚠️ FAISS index for `{file_name}` already exists. Skipping reprocessing.")
+        st.success(f"✅ FAISS index for `{file_name}` already exists.")
         return True
 
     # Create new FAISS index
