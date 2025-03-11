@@ -73,8 +73,9 @@ def ensure_faiss_downloaded(index_name):
 
     return True
 
-# Create FAISS Index
+# Create FAISS Index (Only Runs During PDF Upload)
 def create_vector_store(file_name, documents):
+    """Creates and uploads FAISS index. Runs **ONLY ONCE** during PDF upload."""
     local_folder = "/tmp"
     faiss_folder = os.path.join(local_folder, file_name)
     os.makedirs(faiss_folder, exist_ok=True)
@@ -82,18 +83,14 @@ def create_vector_store(file_name, documents):
     faiss_index_path = os.path.join(faiss_folder, "index")
     pkl_path = os.path.join(faiss_folder, "index.pkl")
 
-    # Create new FAISS index if missing
+    # Check if FAISS already exists to avoid reprocessing
+    if faiss_exists_in_s3(file_name):
+        st.warning(f"⚠️ FAISS index for `{file_name}` already exists. Skipping reprocessing.")
+        return True
+
+    # Create new FAISS index
     vectorstore_faiss = FAISS.from_documents(documents, bedrock_embeddings)
     vectorstore_faiss.save_local(index_name="index", folder_path=faiss_folder)
-
-    # Validate FAISS index was created
-    if not os.path.exists(faiss_index_path + ".faiss"):
-        st.error(f"❌ ERROR: FAISS Index `{faiss_index_path}.faiss` was NOT created! Check logs.")
-        return False
-
-    if not os.path.exists(pkl_path):
-        with open(pkl_path, "wb") as f:
-            pass  # Create empty pkl file if missing
 
     # Upload FAISS Index & Metadata to S3
     s3_client.upload_file(faiss_index_path + ".faiss", BUCKET_NAME, f"faiss_files/{file_name}.faiss")
@@ -112,7 +109,7 @@ def list_faiss_indexes():
 
 # Load FAISS index from local storage
 def load_faiss_index(index_name):
-    """Load FAISS index after ensuring it is downloaded."""
+    """Loads FAISS index from local storage or downloads if missing."""
     if ensure_faiss_downloaded(index_name):
         return FAISS.load_local(
             index_name=index_name,
@@ -191,9 +188,7 @@ def main():
                 continue
 
             splitted_docs = split_text(pages)
-            st.write(f"Creating the Vector Store for {uploaded_file.name}...")
             create_vector_store(clean_name, splitted_docs)
-            st.success(f"Successfully processed {uploaded_file.name}!")
 
     # Question Answering
     st.subheader("Ask Questions from the Knowledge Base")
@@ -207,11 +202,10 @@ def main():
     question = st.text_input(f"Ask a question about {selected_index}")
 
     if st.button("Ask Question"):
-        with st.spinner("Finding the best answer..."):
-            selected_vectorstore = load_faiss_index(selected_index)
-            response, retrieved_docs = get_response(get_llm(), selected_vectorstore, question)
-            st.success("Here's the answer:")
-            st.write(response["result"])
+        selected_vectorstore = load_faiss_index(selected_index)
+        response, retrieved_docs = get_response(get_llm(), selected_vectorstore, question)
+        st.success("Here's the answer:")
+        st.write(response["result"])
 
 if __name__ == "__main__":
     main()
